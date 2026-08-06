@@ -1,0 +1,398 @@
+// Código em C
+// ============================================================
+//  CARRINHO AUTÔNOMO ESP32
+//  Ponte H (L298N/L293D) + Sensor Fim de Curso + NTP via Wi-Fi
+//  Autor: código base gerado para ESP32 DevKit
+// ============================================================
+
+#include <WiFi.h>
+#include <time.h>
+
+// ─────────────────────────────────────────────
+//  CONFIGURAÇÕES DE REDE
+// ─────────────────────────────────────────────
+const char* SSID     = "SEU_SSID";
+const char* PASSWORD = "SUA_SENHA";
+
+// NTP (fuso horário de Brasília: UTC-3)
+const char* NTP_SERVER   = "pool.ntp.org";
+const long  GMT_OFFSET   = -3 * 3600;   // -3h em segundos
+const int   DST_OFFSET   = 0;           // sem horário de verão
+
+// ─────────────────────────────────────────────
+//  PINOS – PONTE H (L298N ou L293D)
+//  Ajuste conforme sua fiação
+// ─────────────────────────────────────────────
+// Motor A (esquerdo)
+#define MOTOR_A_IN1  25
+#define MOTOR_A_IN2  26
+#define MOTOR_A_ENA  27   // PWM
+
+// Motor B (direito)
+#define MOTOR_B_IN3  14
+#define MOTOR_B_IN4  12
+#define MOTOR_B_ENB  13   // PWM
+
+// ─────────────────────────────────────────────
+//  PINOS – SENSORES DE FIM DE CURSO
+// ─────────────────────────────────────────────
+#define FIM_CURSO_FRENTE  34   // GPIO com INPUT_PULLUP
+#define FIM_CURSO_TRAS    35   // GPIO com INPUT_PULLUP
+// Dica: GPIOs 34/35 são input-only no ESP32
+
+// ─────────────────────────────────────────────
+//  CANAIS LEDC (PWM do ESP32)
+// ─────────────────────────────────────────────
+#define PWM_CANAL_A   0
+#define PWM_CANAL_B   1
+#define PWM_FREQ      1000   // Hz
+#define PWM_BITS      8      // resolução 0-255
+
+// ─────────────────────────────────────────────
+//  AGENDA DE OPERAÇÃO
+//  Defina quantos períodos quiser
+// ─────────────────────────────────────────────
+struct Periodo {
+  int horaInicio;
+  int minInicio;
+  int horaFim;
+  int minFim;
+  int velocidade;   // 0–255
+};
+
+// Exemplo: roda das 08:00 às 08:05 e das 14:00 às 14:10
+const Periodo agenda[] = {    // estrutra
+  {8,  0,  8,  5,  200},      //ordem: {horaInicio, minInicio, horaFim, minFim, velocidade}.
+  {14, 0,  14, 10, 180},      //das 8:00 às 8:05, à 200 PWM
+   							  //das 14:00 às 14:10, à 180 PWM  
+};
+const int NUM_PERIODOS = sizeof(agenda) / sizeof(agenda[0]);
+
+// ─────────────────────────────────────────────
+//  ESTADO GLOBAL
+// ─────────────────────────────────────────────
+enum EstadoMotor { PARADO, FRENTE, TRAS};
+EstadoMotor estadoAtual = PARADO;
+
+
+bool carritoAtivo = false;   // horário autoriza movimento?
+
+
+// ─────────────────────────────────────────────
+//  PROTÓTIPOS
+// ─────────────────────────────────────────────
+
+
+
+
+void conectarWifi();
+void sincronizarNTP();
+bool dentroDoHorario(int h, int m);
+void verificarAgenda();
+void verificarFimDeCurso();
+void moverFrente(int vel);
+void moverTras(int vel);
+void parar();
+void setPWM(int canal, int valor);
+
+
+
+
+
+
+
+
+// ─────────────────────────────────────────────
+//  SETUP
+// ─────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+
+
+
+
+
+
+
+
+  // Configura pinos da ponte H
+  pinMode(MOTOR_A_IN1, OUTPUT);
+  pinMode(MOTOR_A_IN2, OUTPUT);
+  pinMode(MOTOR_B_IN3, OUTPUT);
+  pinMode(MOTOR_B_IN4, OUTPUT);
+
+
+
+
+
+
+
+
+  // Configura PWM LEDC
+  ledcSetup(PWM_CANAL, PWM_FREQ, PWM_BITS);  //O canal é um "gerador de funções" criados dentro do chip
+  ledcAttachPin(MOTOR_A_ENA, PWM_CANAL);
+  ledcAttachPin(MOTOR_B_ENB, PWM_CANAL);
+
+
+
+
+
+
+
+
+  // Sensores de fim de curso com pull-up interno
+  // (GPIOs 34/35 não têm pull-up interno – use resistor externo 10kΩ)
+  pinMode(FIM_CURSO_FRENTE, INPUT);
+  pinMode(FIM_CURSO_TRAS,   INPUT);
+
+
+  parar();
+
+
+
+
+
+
+
+
+  conectarWifi();
+  sincronizarNTP();
+
+
+
+
+
+
+
+
+  Serial.println("Sistema inicializado.");
+}
+
+
+
+
+
+
+
+
+// ─────────────────────────────────────────────
+//  LOOP PRINCIPAL
+// ─────────────────────────────────────────────
+void loop() {
+  verificarAgenda();        // Aqui vai responder se o carrinho está ativo ou não
+  verificarFimDeCurso();    // reage a obstáculos/limites
+
+
+
+
+
+
+
+
+  if (carritoAtivo) {
+    if (estadoAtual == PARADO {
+      // Retoma movimento normal após início do período
+      moverFrente(180);
+    }
+  } else {
+    parar();
+  }
+
+
+  delay(100);   // ciclo a cada 100 ms
+}
+
+
+// ─────────────────────────────────────────────
+//  WI-FI
+// ─────────────────────────────────────────────
+
+
+void conectarWifi() {
+  Serial.print("Conectando ao Wi-Fi");
+  WiFi.begin(SSID, PASSWORD);
+
+
+  int tentativas = 0;
+  
+  while (WiFi.status() != WL_CONNECTED && tentativas < 30) {
+    delay(500);
+    Serial.print(".");     		//No terminal do Arduino IDE
+    tentativas++;
+  }
+
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWi-Fi conectado! IP: " + WiFi.localIP().toString());
+  } else {
+    Serial.println("\nFalha ao conectar. Continuando sem NTP.");
+  }
+}
+
+
+// ─────────────────────────────────────────────
+//  NTP
+// ─────────────────────────────────────────────
+
+
+void sincronizarNTP() {
+  configTime(GMT_OFFSET, DST_OFFSET, NTP_SERVER);
+  Serial.print("Sincronizando hora NTP");
+  struct tm info;
+  int t = 0;
+
+
+  while (!getLocalTime(&info) && t < 20) {
+    delay(500);
+    Serial.print(".");
+    t++;
+  }
+  if (t < 20) {
+    char buf[32];
+    strftime(buf, sizeof(buf), "%d/%m/%Y %H:%M:%S", &info);
+    Serial.printf("\nHora sincronizada: %s\n", buf);
+  } else {
+    Serial.println("\nNão foi possível sincronizar a hora.");
+  }
+}
+
+
+// ─────────────────────────────────────────────
+//  AGENDA / HORÁRIO
+// ─────────────────────────────────────────────
+
+
+void verificarAgenda() {
+  struct tm info;
+  if (!getLocalTime(&info)) return;
+
+
+  int h = info.tm_hour;
+  int m = info.tm_min;
+
+
+  carritoAtivo = dentroDoHorario(h, m);
+}
+
+
+bool dentroDoHorario(int h, int m) {
+  int agora = h * 60 + m;
+  for (int i = 0; i < NUM_PERIODOS; i++) {
+    int ini = agenda[i].horaInicio * 60 + agenda[i].minInicio;      //Para chegar a um valor de minutos
+    int fim = agenda[i].horaFim    * 60 + agenda[i].minFim;			//sem arredondamentos
+    if (agora >= ini && agora < fim) return true;
+  }
+  return false;
+}
+
+
+// ─────────────────────────────────────────────
+//  FIM DE CURSO
+//  LOW = acionado (sensor normalmente fechado com pull-up)
+//  Ajuste a lógica se usar sensor NC ou NO diferente
+// ─────────────────────────────────────────────
+
+
+void verificarFimDeCurso() {
+  bool frenteAtivado = (digitalRead(FIM_CURSO_FRENTE) == LOW);
+  bool trasAtivado   = (digitalRead(FIM_CURSO_TRAS)   == LOW);
+
+
+  if (frenteAtivado && carritoAtivo) {
+    Serial.println("Fim de curso FRENTE acionado! Recuando...");
+    estadoAtual = TRAS;
+    moverTras(180);
+    }
+
+
+
+
+
+
+
+
+  if (trasAtivado && carritoAtivo) {
+    Serial.println("Fim de curso TRÁS acionado! Avançando...");
+    estadoAtual = PARADO;
+    parar;
+
+
+
+
+
+
+
+
+  }
+}
+
+
+
+
+
+
+
+
+// ─────────────────────────────────────────────
+//  CONTROLE DOS MOTORES
+// ─────────────────────────────────────────────
+void moverFrente(int vel) {
+  estadoAtual = FRENTE;
+  digitalWrite(MOTOR_A_IN1, HIGH);
+  digitalWrite(MOTOR_A_IN2, LOW);
+  digitalWrite(MOTOR_B_IN3, HIGH);
+  digitalWrite(MOTOR_B_IN4, LOW);
+  setPWM(PWM_CANAL_A, vel);
+  setPWM(PWM_CANAL_B, vel);
+  Serial.printf("→ Frente (vel=%d)\n", vel);
+}
+
+
+
+
+
+
+
+
+void moverTras(int vel) {    
+ 
+  estadoAtual = TRAS;
+  digitalWrite(MOTOR_A_IN1, LOW);
+  digitalWrite(MOTOR_A_IN2, HIGH);
+  digitalWrite(MOTOR_B_IN3, LOW);
+  digitalWrite(MOTOR_B_IN4, HIGH);
+  setPWM(PWM_CANAL_A, vel);
+  setPWM(PWM_CANAL_B, vel);
+  Serial.printf("← Trás (vel=%d)\n", vel);
+}
+
+
+
+
+
+
+
+
+void parar() {
+  estadoAtual = PARADO;
+  digitalWrite(MOTOR_A_IN1, LOW);
+  digitalWrite(MOTOR_A_IN2, LOW);
+  digitalWrite(MOTOR_B_IN3, LOW);
+  digitalWrite(MOTOR_B_IN4, LOW);
+  setPWM(PWM_CANAL_A, 0);
+  setPWM(PWM_CANAL_B, 0);
+}
+
+
+
+
+
+
+
+
+void setPWM(int canal, int valor) {
+  ledcWrite(canal, constrain(valor, 0, 255));
+}
+
+
+
