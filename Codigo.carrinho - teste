@@ -1,0 +1,258 @@
+// ============================================================
+//   CARRINHO AUTÔNOMO ESP32
+//   Ponte H (L298N/L293D) + Sensor Fim de Curso + NTP via Wi-Fi
+// ============================================================
+
+#include <WiFi.h>
+#include <time.h>
+
+// ─────────────────────────────────────────────
+//  CONFIGURAÇÕES DE REDE
+// ─────────────────────────────────────────────
+const char* SSID     = "SEU_SSID";
+const char* PASSWORD = "SUA_SENHA";
+
+// NTP (fuso horário de Brasília: UTC-3)
+const char* NTP_SERVER   = "pool.ntp.org";
+const long  GMT_OFFSET   = -3 * 3600;   // -3h em segundos
+const int   DST_OFFSET   = 0;           // sem horário de verão
+
+// ─────────────────────────────────────────────
+//  PINOS – PONTE H
+// ─────────────────────────────────────────────
+#define MOTOR_A_IN1  25
+#define MOTOR_A_IN2  26
+#define MOTOR_A_ENA  27   // PWM
+
+#define MOTOR_B_IN3  14
+#define MOTOR_B_IN4  12
+#define MOTOR_B_ENB  13   // PWM
+
+// ─────────────────────────────────────────────
+//  PINOS – SENSORES DE FIM DE CURSO
+// ─────────────────────────────────────────────
+#define FIM_CURSO_FRENTE  34   
+#define FIM_CURSO_TRAS    35   
+
+// ─────────────────────────────────────────────
+//  CANAIS LEDC (PWM do ESP32)
+// ─────────────────────────────────────────────
+#define PWM_CANAL_A   0
+#define PWM_CANAL_B   1
+#define PWM_FREQ      1000   // Hz
+#define PWM_BITS      8      // resolução 0-255
+
+// ─────────────────────────────────────────────
+//  AGENDA DE OPERAÇÃO
+// ─────────────────────────────────────────────
+struct Periodo {
+  int horaInicio;
+  int minInicio;
+  int horaFim;
+  int minFim;
+  int velocidade;   // 0–255
+};
+
+const Periodo agenda[] = {    
+  {8,  0,  8,  5, 200},
+  {14, 0, 14, 10, 180} 
+};
+const int NUM_PERIODOS = sizeof(agenda) / sizeof(agenda[0]);
+
+// ─────────────────────────────────────────────
+//  ESTADO GLOBAL
+// ─────────────────────────────────────────────
+enum EstadoMotor { PARADO, FRENTE, TRAS };
+EstadoMotor estadoAtual = PARADO;
+
+bool carritoAtivo = false;
+
+// ─────────────────────────────────────────────
+//  PROTÓTIPOS
+// ─────────────────────────────────────────────
+void conectarWifi();
+void sincronizarNTP();
+bool dentroDoHorario(int h, int m);
+void verificarAgenda();
+void verificarFimDeCurso();
+void moverFrente(int vel);
+void moverTras(int vel);
+void parar();
+void setPWM(int canal, int valor);
+
+// ─────────────────────────────────────────────
+//  SETUP
+// ─────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(MOTOR_A_IN1, OUTPUT);
+  pinMode(MOTOR_A_IN2, OUTPUT);
+  pinMode(MOTOR_B_IN3, OUTPUT);
+  pinMode(MOTOR_B_IN4, OUTPUT);
+
+  // Configuração correta dos canais PWM LEDC
+  ledcSetup(PWM_CANAL_A, PWM_FREQ, PWM_BITS);
+  ledcAttachPin(MOTOR_A_ENA, PWM_CANAL_A);
+
+  ledcSetup(PWM_CANAL_B, PWM_FREQ, PWM_BITS);
+  ledcAttachPin(MOTOR_B_ENB, PWM_CANAL_B);
+
+  pinMode(FIM_CURSO_FRENTE, INPUT);
+  pinMode(FIM_CURSO_TRAS, INPUT);
+
+  parar();
+
+  conectarWifi();
+  sincronizarNTP();
+  
+  Serial.println("Sistema inicializado.");
+}
+
+// ─────────────────────────────────────────────
+//  LOOP PRINCIPAL
+// ─────────────────────────────────────────────
+void loop() {
+  verificarAgenda();        
+  verificarFimDeCurso();    
+
+  if (carritoAtivo) {
+    if (estadoAtual == PARADO) {
+      moverFrente(180);
+    }
+  } else {
+    parar();
+  }
+
+  delay(100);   
+}
+
+// ─────────────────────────────────────────────
+//  WI-FI
+// ─────────────────────────────────────────────
+void conectarWifi() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.print("Conectando ao Wi-Fi");
+    WiFi.begin(SSID, PASSWORD);
+  }
+
+  int tentativas = 0;
+  while (WiFi.status() != WL_CONNECTED && tentativas < 30) {
+    delay(500);
+    Serial.print(".");        
+    tentativas++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWi-Fi conectado! IP: " + WiFi.localIP().toString());
+  } else {
+    Serial.println("\nFalha ao conectar. Continuando sem NTP.");
+  }
+}
+
+// ─────────────────────────────────────────────
+//  NTP
+// ─────────────────────────────────────────────
+void sincronizarNTP() {
+  configTime(GMT_OFFSET, DST_OFFSET, NTP_SERVER);
+  Serial.print("Sincronizando hora NTP");
+  struct tm info;  
+  int t = 0;
+
+  while (!getLocalTime(&info) && t < 20) {
+    delay(500);
+    Serial.print(".");
+    t++;
+  }
+  if (t < 20) {
+    char buf[32];
+    strftime(buf, sizeof(buf), "%d/%m/%Y %H:%M:%S", &info);
+    Serial.printf("\nHora sincronizada: %s\n", buf);
+  } else {
+    Serial.println("\nNão foi possível sincronizar a hora.");
+  }
+}
+
+
+
+// ─────────────────────────────────────────────
+//  AGENDA / HORÁRIO
+// ─────────────────────────────────────────────
+void verificarAgenda() {
+  struct tm info;
+  if (!getLocalTime(&info)) return;
+
+  int h = info.tm_hour;
+  int m = info.tm_min;
+
+  carritoAtivo = dentroDoHorario(h, m);
+  
+  Serial.println(&(info), "%d/%m/%Y %H:%M:%S");
+}
+
+bool dentroDoHorario(int h, int m) {
+  int agora = h * 60 + m;
+  for (int i = 0; i < NUM_PERIODOS; i++) {
+    int ini = agenda[i].horaInicio * 60 + agenda[i].minInicio;     
+    int fim = agenda[i].horaFim    * 60 + agenda[i].minFim;     
+    if (agora >= ini && agora < fim) return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────
+//  FIM DE CURSO
+// ─────────────────────────────────────────────
+void verificarFimDeCurso() {
+  bool frenteAtivado = (digitalRead(FIM_CURSO_FRENTE) == LOW);
+  bool trasAtivado   = (digitalRead(FIM_CURSO_TRAS)   == LOW);
+
+  if (frenteAtivado && carritoAtivo) {
+    Serial.println("Fim de curso FRENTE acionado! Recuando...");
+    moverTras(180);
+  }
+
+  if (trasAtivado && carritoAtivo) {
+    Serial.println("Fim de curso TRÁS acionado! Avançando...");
+    parar();
+  }
+}
+
+// ─────────────────────────────────────────────
+//  CONTROLE DOS MOTORES
+// ─────────────────────────────────────────────
+void moverFrente(int vel) {
+  estadoAtual = FRENTE;
+  digitalWrite(MOTOR_A_IN1, HIGH);
+  digitalWrite(MOTOR_A_IN2, LOW);
+  digitalWrite(MOTOR_B_IN3, HIGH);
+  digitalWrite(MOTOR_B_IN4, LOW);
+  setPWM(PWM_CANAL_A, vel);
+  setPWM(PWM_CANAL_B, vel);
+  Serial.printf("→ Frente (vel=%d)\n", vel);
+}
+
+void moverTras(int vel) {   
+  estadoAtual = TRAS;
+  digitalWrite(MOTOR_A_IN1, LOW);
+  digitalWrite(MOTOR_A_IN2, HIGH);
+  digitalWrite(MOTOR_B_IN3, LOW);
+  digitalWrite(MOTOR_B_IN4, HIGH);
+  setPWM(PWM_CANAL_A, vel);
+  setPWM(PWM_CANAL_B, vel);
+  Serial.printf("← Trás (vel=%d)\n", vel);
+}
+
+void parar() {
+  estadoAtual = PARADO;
+  digitalWrite(MOTOR_A_IN1, LOW);
+  digitalWrite(MOTOR_A_IN2, LOW);
+  digitalWrite(MOTOR_B_IN3, LOW);
+  digitalWrite(MOTOR_B_IN4, LOW);
+  setPWM(PWM_CANAL_A, 0);
+  setPWM(PWM_CANAL_B, 0);
+}
+
+void setPWM(int canal, int valor) {
+  ledcWrite(canal, constrain(valor, 0, 255));
+}
