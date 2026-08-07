@@ -1,0 +1,137 @@
+#include "esp_camera.h"
+#include <WiFi.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
+
+// Pinos da Câmera (Modelo AI Thinker)
+#define PWDN_GPIO_NUM     32
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
+const char* ssid = "FamiliaSimoes";
+const char* password = "01092004";
+// URL do seu servidor PHP no XAMPP
+const char* serverName = "http://IP_DO_SEU_COMPUTADOR/seu_projeto/upload.php"; 
+
+WebServer server(80); // Cria o servidor web na porta 80
+
+// Variáveis para o Deep Sleep
+#define uS_TO_S_FACTOR 1000000ULL  /* Fator de conversão de microsegundos para segundos */
+#define TIME_TO_SLEEP  604800ULL   /* 7 dias em segundos (7 * 24 * 60 * 60) */
+
+void setup() {
+  Serial.begin(115200);
+
+  // 1. Configuração da Câmera (mantida do seu código base)
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.frame_size = FRAMESIZE_UXGA;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = CAMERA_FB_IN_PSRAM;
+  config.jpeg_quality = 10;
+  config.fb_count = 2;
+
+  if (esp_camera_init(&config) != ESP_OK) {
+    Serial.println("Erro ao iniciar a câmera!");
+    return;
+  }
+
+  // 2. Conexão Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi conectado!");
+  Serial.print("IP da ESP-CAM (Coloque isso no código do carro): ");
+  Serial.println(WiFi.localIP()); // IMPORTANTE: Anote esse IP para colocar no carrinho!
+
+  // 3. Rota que o carrinho vai chamar
+  server.on("/tirar_foto", rotinaDeFotos);
+  server.begin();
+}
+
+void loop() {
+  // Mantém o servidor ouvindo as requisições do carrinho
+  server.handleClient();
+}
+
+// 4. Função executada quando o carrinho avisa que chegou
+void rotinaDeFotos() {
+  Serial.println("Carrinho em posição. Iniciando fotos...");
+  
+  // Tira a primeira foto e envia
+  enviarFotoAoServidor();
+  
+  delay(5000); // Aguarda 5 segundos
+  
+  // Tira a segunda foto e envia
+  enviarFotoAoServidor();
+
+  // Responde ao carrinho que ele já pode ir embora
+  server.send(200, "text/plain", "OK_PODE_VOLTAR");
+  
+  delay(1000); // Pequeno atraso para garantir o envio da resposta
+  
+  // Entra em modo de repouso por 7 dias
+  Serial.println("Entrando em Deep Sleep por 7 dias...");
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  esp_deep_sleep_start();
+}
+
+// 5. Função para capturar a imagem e enviar via POST ao PHP
+void enviarFotoAoServidor() {
+  camera_fb_t * fb = esp_camera_fb_get(); // Captura a foto
+  if (!fb) {
+    Serial.println("Falha na captura");
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(serverName);
+  http.addHeader("Content-Type", "image/jpeg");
+
+  // Faz o POST da imagem
+  int httpResponseCode = http.POST(fb->buf, fb->len);
+  
+  if (httpResponseCode > 0) {
+    Serial.printf("Foto enviada! Código HTTP: %d\n", httpResponseCode);
+  } else {
+    Serial.printf("Erro no envio: %s\n", http.errorToString(httpResponseCode).c_str());
+  }
+
+  http.end();
+  esp_camera_fb_return(fb); // Limpa a memória
+}
