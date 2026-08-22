@@ -1,20 +1,28 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
+#include <WiFi.h>
 
 #define RELE 23          // Relé ligado no GPIO 23
 #define SENSOR_SOLO 34   // Pino ADC do ESP32 (somente leitura)
+
+// Alterado de 35 para 25 (GPIO 35 é APENAS entrada no ESP32!)
+#define ledVermelho 32
+#define ledAmarelo 33
+#define ledVerde 25
 
 #define DHTPIN 26        // Pino digital do DHT11
 #define DHTTYPE DHT11
 
 // VALORES DE CALIBRAÇÃO DO SENSOR CAPACITIVO (ESP32 - ADC 12 bits)
-// Faça o teste no monitor serial para calibrar com o seu sensor:
-const int VALOR_SECO = 3000;  // Valor com o sensor totalmente no AR (0% de umidade)
-const int VALOR_UMIDO = 1350; // Valor com o sensor submerso em ÁGUA (100% de umidade)
+const int VALOR_SECO = 3000;  // Valor com o sensor no AR (0%)
+const int VALOR_UMIDO = 1350; // Valor com o sensor na ÁGUA (100%)
 
 DHT dht(DHTPIN, DHTTYPE);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+const char* ssid = "Ferreira casa";
+const char* password = "09111991";
 
 void setup() {
   Wire.begin(21, 22);    // SDA = 21, SCL = 22
@@ -26,7 +34,38 @@ void setup() {
   dht.begin();
 
   pinMode(RELE, OUTPUT);
-  digitalWrite(RELE, HIGH); // Relé desligado por padrão (lógica invertida comum)
+  digitalWrite(RELE, HIGH); // Relé desligado por padrão
+
+  pinMode(ledAmarelo, OUTPUT);
+  pinMode(ledVerde, OUTPUT);
+  pinMode(ledVermelho, OUTPUT);
+
+  WiFi.begin(ssid, password);
+  Serial.print("Conectando ao WiFi");
+
+  int i = 0;
+  while (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(ledAmarelo, HIGH);
+    delay(500);
+    digitalWrite(ledAmarelo, LOW);
+    delay(500);
+    
+    Serial.print(".");
+    i++;
+
+    // Cancela após 10 tentativas (3 segundos)
+    if (i >= 20) {
+      Serial.println("\nFalha na conexao WiFi!");
+      digitalWrite(ledVermelho, HIGH);
+      break; // Agora está dentro do while, funciona corretamente!
+    }
+  }
+
+  // Se conectou com sucesso
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Conectado!");
+    digitalWrite(ledVerde, HIGH);
+  }
 }
 
 void loop() {
@@ -39,7 +78,7 @@ void loop() {
   
   // Converte a leitura analógica invertida para porcentagem de 0 a 100%
   int umidadeSolo = map(leituraBruta, VALOR_SECO, VALOR_UMIDO, 0, 100);
-  umidadeSolo = constrain(umidadeSolo, 0, 100); // Garante que fique entre 0% e 100%
+  umidadeSolo = constrain(umidadeSolo, 0, 100);
 
   // Exibição no Monitor Serial
   Serial.print(F("Bruto Solo: "));
@@ -90,9 +129,9 @@ void loop() {
     lcd.print(umidadeSolo);
     lcd.print("%");
 
-    digitalWrite(RELE, LOW);  // Liga o relé
-    delay(3000);               // Tempo de irrigação
-    digitalWrite(RELE, HIGH); // Desliga o relé
+    digitalWrite(RELE, LOW);   // Liga o relé
+    delay(3000);              // Tempo de irrigação
+    digitalWrite(RELE, HIGH);  // Desliga o relé
 
   } else if (umidadeSolo >= 30 && umidadeSolo <= 70) {
     // Solo com umidade ideal
@@ -102,7 +141,7 @@ void loop() {
     lcd.print(umidadeSolo);
     lcd.print("%");
 
-    digitalWrite(RELE, HIGH); // Relé desligado
+    digitalWrite(RELE, HIGH);  // Relé desligado
     delay(3000);
 
   } else {
@@ -113,7 +152,7 @@ void loop() {
     lcd.print(umidadeSolo);
     lcd.print("%");
 
-    digitalWrite(RELE, HIGH); // Relé desligado
+    digitalWrite(RELE, HIGH);  // Relé desligado
     delay(3000);
   }
 
