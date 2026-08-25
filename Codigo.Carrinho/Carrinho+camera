@@ -1,0 +1,96 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+const char* ssid = "FamiliaSimoes";
+const char* password = "01092004";
+
+// Coloque aqui o IP que apareceu no Monitor Serial da ESP32-CAM
+const char* url_camera = "http://IP_DA_ESP_CAM/tirar_foto"; 
+
+// Pinos da Ponte H (Ajuste conforme suas ligações físicas)
+const int IN1 = 26;
+const int IN2 = 27;
+const int IN3 = 14;
+const int IN4 = 12;
+
+// Tempo estimado para andar 0,5m (Você precisa calibrar testando na prática)
+const int TEMPO_DESLOCAMENTO = 2000; // 2000 milissegundos = 2 segundos
+
+// Variáveis para o Deep Sleep
+#define uS_TO_S_FACTOR 1000000ULL
+#define TIME_TO_SLEEP  604800ULL // 7 dias
+
+void setup() {
+  Serial.begin(115200);
+  
+  // 1. Configura pinos dos motores
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  // 2. Acorda e imediatamente vai para a posição (anda 0,5m)
+  andarFrente();
+  delay(TEMPO_DESLOCAMENTO);
+  pararMotores();
+
+  // 3. Conecta ao Wi-Fi para avisar a câmera
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi Conectado. Avisando a Câmera...");
+
+  // 4. Entra em loop tentando avisar a câmera. Só sai quando a câmera responder "OK"
+  bool fotosTiradas = false;
+  while (!fotosTiradas) {
+    HTTPClient http;
+    http.begin(url_camera);
+    int httpCode = http.GET(); // Envia o pedido
+
+    if (httpCode > 0) {
+      String resposta = http.getString();
+      if (resposta == "OK_PODE_VOLTAR") {
+        Serial.println("Fotos tiradas! Retornando...");
+        fotosTiradas = true;
+      }
+    }
+    http.end();
+    
+    // Se a câmera não respondeu ainda (pode estar ligando), espera 2 segundos e tenta de novo
+    if (!fotosTiradas) {
+      delay(2000); 
+    }
+  }
+
+  // 5. Retorna ao ponto inicial
+  andarTras();
+  delay(TEMPO_DESLOCAMENTO);
+  pararMotores();
+
+  // 6. Entra em Deep Sleep por 7 dias
+  Serial.println("Missão cumprida. Dormindo por 7 dias...");
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  esp_deep_sleep_start();
+}
+
+void loop() {
+  // Vazio, pois o ESP32 desliga (Deep Sleep) no final do setup()
+}
+
+// Funções auxiliares de movimento (Linha Reta)
+void andarFrente() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+
+void andarTras() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+
+void pararMotores() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+}
