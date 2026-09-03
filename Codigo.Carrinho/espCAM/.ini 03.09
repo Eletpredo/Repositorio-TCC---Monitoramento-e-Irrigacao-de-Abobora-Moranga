@@ -1,0 +1,15 @@
+[env:esp32cam]
+platform = espressif32
+board = esp32cam
+framework = arduino
+monitor_speed = 115200
+
+; Desativa os sinais DTR/RTS para evitar que o monitor serial trave o boot no módulo MB
+monitor_rts = 0
+monitor_dtr = 0
+
+build_flags =
+    -DBOARD_HAS_PSRAM
+    -DCAMERA_MODEL_AI_THINKER
+
+board_build.partitions = min_spiffs.csv
