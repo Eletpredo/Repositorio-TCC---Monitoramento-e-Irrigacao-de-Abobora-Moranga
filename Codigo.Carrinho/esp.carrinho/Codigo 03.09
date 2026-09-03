@@ -1,0 +1,83 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+const char* ssid = "Note_natalia/pedro";
+const char* password = "21011997";
+
+// Pinos da Ponte H
+const int IN1 = 26;
+const int IN2 = 23;
+const int IN3 = 14;
+const int IN4 = 12;
+
+const int TEMPO_DESLOCAMENTO = 2000; // 2 segundos
+
+#define uS_TO_S_FACTOR 1000000ULL
+#define TIME_TO_SLEEP   604800ULL // 7 dias
+
+WebServer server(80);
+bool fotoConcluida = false;
+
+void andarFrente() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+
+void andarTras() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+
+void pararMotores() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+}
+
+// Rota acionada QUANDO a ESP32-CAM avisa que terminou
+void handleFotoTirada() {
+  Serial.println("Aviso da ESP32-CAM recebido! Fotos tiradas.");
+  server.send(200, "text/plain", "OK_ROBO_CIENTE");
+  fotoConcluida = true;
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  // Parada preventiva dos motores no boot
+  pararMotores();
+
+  // 1. Anda para frente
+  Serial.println("Andando para frente...");
+  andarFrente();
+  delay(TEMPO_DESLOCAMENTO);
+  pararMotores();
+
+  // 2. Conecta ao Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi Conectado!");
+  Serial.print("IP do Robô: ");
+  Serial.println(WiFi.localIP());
+
+  // Configura a rota de escuta
+  server.on("/foto_tirada", handleFotoTirada);
+  server.begin();
+  Serial.println("Aguardando a ESP32-CAM enviar o comando...");
+}
+
+void loop() {
+  // Aguarda a ESP32-CAM acionar a rota /foto_tirada
+  if (!fotoConcluida) {
+    server.handleClient();
+  } else {
+    digitalWrite (IN2, 1); 
+  }
+}
