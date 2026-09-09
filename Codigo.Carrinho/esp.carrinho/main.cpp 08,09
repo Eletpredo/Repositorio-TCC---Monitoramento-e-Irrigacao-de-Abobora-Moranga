@@ -1,0 +1,74 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+// Credenciais da rede
+const char* ssid = "Bar do pedro";
+const char* password = "03031968";
+
+// Controle dos atuadores
+const int IN1 = 26, IN2 = 23, IN3 = 14, IN4 = 12;
+#define LED_PIN 25
+const int TEMPO_DESLOCAMENTO = 2000;
+
+WebServer server(80);
+bool fotoConcluida = false;
+bool estadoLed = false;
+
+void andarFrente() { digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); }
+void andarTras()   { digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); }
+void pararMotores() { digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); digitalWrite(IN3, LOW); digitalWrite(IN4, LOW); }
+
+// Rota acionada pela ESP32-CAM
+void handleFotoTirada() {
+  Serial.println("\nAviso da ESP32-CAM recebido!");
+  
+  // Alterna o estado do LED
+  estadoLed = !estadoLed;
+  digitalWrite(LED_PIN, estadoLed ? HIGH : LOW);
+
+  // Responde confirmação HTTP 200 à câmera
+  server.send(200, "text/plain", estadoLed ? "OK_LED_LIGADO" : "OK_LED_DESLIGADO");
+  
+  fotoConcluida = true; // Sinaliza o loop para mover os motores
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+  pararMotores();
+
+  // Movimentação inicial
+  andarFrente();
+  delay(TEMPO_DESLOCAMENTO);
+  pararMotores();
+
+  // Conexão Wi-Fi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+
+  Serial.println("\nWi-Fi Conectado!");
+  Serial.print("IP do Robô: ");
+  Serial.println(WiFi.localIP());
+
+  // Mapeamento das rotas recebidas
+  server.on("/foto_tirada", handleFotoTirada);
+  server.on("/", handleFotoTirada);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient(); // Mantém o servidor rodando
+
+  if (fotoConcluida) {
+    Serial.println("Recuando robô...");
+    andarTras();
+    delay(TEMPO_DESLOCAMENTO);
+    pararMotores();
+    fotoConcluida = false;
+  }
+}
