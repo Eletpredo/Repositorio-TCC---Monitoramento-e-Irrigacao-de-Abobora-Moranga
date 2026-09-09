@@ -1,0 +1,132 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+const char* ssid = "Ferreira casa";
+const char* password = "09111991";
+
+// Pinos da Ponte H
+const int IN1 = 26;
+const int IN2 = 23;
+const int IN3 = 14;
+const int IN4 = 12;
+
+// Pino do LED Externo
+#define LED_PIN 25
+
+const int TEMPO_DESLOCAMENTO = 2000; // 2 segundos
+
+#define uS_TO_S_FACTOR 1000000ULL
+#define TIME_TO_SLEEP   604800ULL // 7 dias
+
+WebServer server(80);
+
+bool fotoConcluida = false;
+bool estadoLed = false; // Estado do LED (LIGADO/DESLIGADO)
+
+// Funções de controle dos Motores
+void andarFrente() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+
+void andarTras() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+
+void pararMotores() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+}
+
+// Rota acionada QUANDO a ESP32-CAM envia o sinal (ex: /foto_tirada)
+void handleFotoTirada() {
+  Serial.println("\nAviso da ESP32-CAM recebido!");
+
+  // Inverte o estado do LED a cada acionamento da câmera
+  estadoLed = !estadoLed;
+  digitalWrite(LED_PIN, estadoLed ? HIGH : LOW);
+
+  if (estadoLed) {
+    Serial.println("LED no pino 25 LIGADO!");
+  } else {
+    Serial.println("LED no pino 25 DESLIGADO!");
+  }
+
+  // Responde à ESP32-CAM confirmando o recebimento
+  server.send(200, "text/plain", estadoLed ? "OK_LED_LIGADO" : "OK_LED_DESLIGADO");
+  
+  // Sinaliza para dar sequencia à movimentação no loop()
+  fotoConcluida = true;
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000); // Aguarda a estabilização do Serial Monitor
+
+  // Configuração dos pinos da Ponte H e LED
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  digitalWrite(LED_PIN, LOW); // LED começa desligado
+  pararMotores();            // Parada preventiva dos motores no boot
+
+  // 1. Anda para frente no início do ciclo
+  Serial.println("Andando para frente...");
+  andarFrente();
+  delay(TEMPO_DESLOCAMENTO);
+  pararMotores();
+
+  // 2. Conecta ao Wi-Fi (Modo Otimizado)
+  WiFi.mode(WIFI_STA);       // Garante modo Estação puro
+  WiFi.disconnect(true);     // Limpa configurações de conexões prévias
+  delay(100);
+  WiFi.setSleep(false);      // Desativa o Power Save da Wi-Fi (Fundamental para estabilidade)
+
+  Serial.print("Conectando à rede: ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+
+  int tentativas = 0;
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    tentativas++;
+
+    // Se falhar após 30 tentativas (15 segundos), reinicia para tentar novamente
+    if (tentativas >= 30) {
+      Serial.println("\n[ERRO] Falha ao conectar no Wi-Fi. Reiniciando placa...");
+      ESP.restart();
+    }
+  }
+
+  Serial.println("\nWi-Fi Conectado com Sucesso!");
+  Serial.print("IP do Robô: ");
+  Serial.println(WiFi.localIP());
+
+  // Configura a rota de escuta chamando a função de tratamento
+  server.on("/foto_tirada", handleFotoTirada);
+  server.on("/", handleFotoTirada); // Aceita requisições feitas diretamente na raiz (/)
+  
+  server.begin();
+  Serial.println("Aguardando a ESP32-CAM enviar o comando...");
+}
+
+void loop() {
+  server.handleClient(); // Mantém o servidor escutando requisições
+
+  // Executa a movimentação de retorno apenas após receber a notificação da câmera
+  if (fotoConcluida) {
+    Serial.println("Foto registrada. Recuando o robô...");
+    andarTras();
+    delay(TEMPO_DESLOCAMENTO);
+    pararMotores();
+
+    fotoConcluida = false; // Reseta a flag para o próximo ciclo
+    Serial.println("Ciclo finalizado. Aguardando novos comandos...");
+  }
+}
