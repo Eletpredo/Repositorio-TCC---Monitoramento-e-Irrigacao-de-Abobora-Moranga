@@ -1,0 +1,88 @@
+#include <Arduino.h>
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+
+// Definição dos Pinos dos LEDs
+#define LED1_PIN   25  // LED Vermelho
+#define LED2_PIN   13  // LED Azul
+
+// Callback de status do Bluetooth
+void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
+  if (event == ESP_SPP_SRV_OPEN_EVT) {
+    digitalWrite(LED_BT_PIN, HIGH); // Acende o LED indicador de conexão
+    Serial.println("\n[BT Carrinho] Conectado! LED de Status ACESO.");
+  } 
+  else if (event == ESP_SPP_CLOSE_EVT) {
+    digitalWrite(LED_BT_PIN, LOW);  // Apaga o LED indicador
+    Serial.println("\n[BT Carrinho] Desconectado! LED de Status APAGADO.");
+  }
+}
+
+// Função para acionar os LEDs dos pinos 25 e 13
+void MoverFrente() {
+  digitalWrite(LED1_PIN, HIGH);
+  delay(5000); // Ficam acesos por 1 segundo
+  digitalWrite(LED1_PIN, LOW);
+
+}
+
+void FotoTirada() {
+
+  digitalWrite (LED2_PIN, 1);
+  delay (1500);
+  digitalWrite (LED2_PIN, 0);
+  
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // Configura os pinos dos LEDs como saída
+  pinMode(LED_BT_PIN, OUTPUT);
+  pinMode(LED1_PIN, OUTPUT);
+  pinMode(LED2_PIN, OUTPUT);
+
+  // Inicia com os LEDs apagados
+  digitalWrite(LED_BT_PIN, LOW);
+  digitalWrite(LED1_PIN, LOW);
+  digitalWrite(LED2_PIN, LOW);
+
+  // Registra o callback de eventos antes de iniciar
+  SerialBT.register_callback(btCallback);
+
+  // Inicia o Bluetooth em modo Slave
+  if (SerialBT.begin("ESP32_Carrinho_Robo")) {
+    Serial.println("\n--- ESP32 CARRINHO (SLAVE) ---");
+    Serial.println("Aguardando conexão da ESP32-CAM...");
+  } else {
+    Serial.println("Erro ao inicializar o Bluetooth!");
+  }
+}
+
+void loop() {
+  if (SerialBT.available()) {
+    String comando = SerialBT.readStringUntil('\n');
+    comando.trim();
+
+    if (comando.length() > 0) {
+      Serial.print("[BT Recebido]: ");
+      Serial.println(comando);
+
+      if (comando == "Tirar_foto") {
+        Serial.println("-> Comando 'Tirar_foto' recebido! Acendendo LEDs 13");
+        MoverFrente();
+        SerialBT.println("LED_CONFIRMADO"); 
+      Serial.println("Mensagem de confirmação enviada de volta para a ESP32-CAM!");
+      }
+      if (comando == "Foto_tirada") {
+        Serial.println("-> Comando 'Tirar_foto' recebido! Acendendo LEDs 13");
+        FotoTirada();
+
+      }
+    }
+  }
+
+  delay(20);
+}
