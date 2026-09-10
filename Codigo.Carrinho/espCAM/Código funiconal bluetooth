@@ -1,0 +1,50 @@
+#include <Arduino.h>
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+
+// Nome do Bluetooth da ESP32 do Carrinho
+String nomeRoboBT = "ESP32_Carrinho_Robo"; 
+
+void conectarBluetooth() {
+  if (!SerialBT.connected(0)) {
+    Serial.println("[BT CAM] Tentando conectar ao Carrinho...");
+    if (SerialBT.connect(nomeRoboBT)) {
+      Serial.println("[BT CAM] Conectado ao Carrinho com sucesso!");
+    } else {
+      Serial.println("[BT CAM] Falha ao conectar. Tentará novamente no próximo ciclo.");
+    }
+  }
+}
+
+void enviarSinalFoto() {
+  conectarBluetooth();
+
+  if (SerialBT.connected(0)) {
+    SerialBT.println("FOTO_TIRADA");
+    Serial.println("[BT CAM] Comando 'FOTO_TIRADA' enviado!");
+  } else {
+    Serial.println("[BT CAM] Erro: Bluetooth desconectado.");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("\n--- ESP32-CAM (MASTER BT) ---");
+
+  // Inicia em modo Master (true)
+  SerialBT.begin("ESP32_CAM_Master", true);
+  Serial.println("Bluetooth Master iniciado.");
+
+  // Primeira tentativa de conexão
+  conectarBluetooth();
+}
+
+void loop() {
+  // Envia o comando a cada 5 segundos para teste dos LEDs
+  enviarSinalFoto();
+  
+  delay(5000); 
+}
