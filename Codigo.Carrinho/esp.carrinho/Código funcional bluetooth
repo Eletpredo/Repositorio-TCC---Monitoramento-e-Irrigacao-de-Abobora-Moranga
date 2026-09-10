@@ -1,0 +1,75 @@
+#include <Arduino.h>
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+
+// Definição dos Pinos dos LEDs
+#define LED_BT_PIN 2   // LED indicador de conexão Bluetooth
+#define LED1_PIN   25  // LED 1
+#define LED2_PIN   13  // LED 2
+
+// Callback de status do Bluetooth
+void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
+  if (event == ESP_SPP_SRV_OPEN_EVT) {
+    digitalWrite(LED_BT_PIN, HIGH); // Acende o LED indicador de conexão
+    Serial.println("\n[BT Carrinho] Conectado! LED de Status ACESO.");
+  } 
+  else if (event == ESP_SPP_CLOSE_EVT) {
+    digitalWrite(LED_BT_PIN, LOW);  // Apaga o LED indicador
+    Serial.println("\n[BT Carrinho] Desconectado! LED de Status APAGADO.");
+  }
+}
+
+// Função para acionar os LEDs dos pinos 25 e 13
+void piscarLedsAcao() {
+  digitalWrite(LED1_PIN, HIGH);
+  digitalWrite(LED2_PIN, HIGH);
+  delay(1000); // Ficam acesos por 1 segundo
+  digitalWrite(LED1_PIN, LOW);
+  digitalWrite(LED2_PIN, LOW);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // Configura os pinos dos LEDs como saída
+  pinMode(LED_BT_PIN, OUTPUT);
+  pinMode(LED1_PIN, OUTPUT);
+  pinMode(LED2_PIN, OUTPUT);
+
+  // Inicia com os LEDs apagados
+  digitalWrite(LED_BT_PIN, LOW);
+  digitalWrite(LED1_PIN, LOW);
+  digitalWrite(LED2_PIN, LOW);
+
+  // Registra o callback de eventos antes de iniciar
+  SerialBT.register_callback(btCallback);
+
+  // Inicia o Bluetooth em modo Slave
+  if (SerialBT.begin("ESP32_Carrinho_Robo")) {
+    Serial.println("\n--- ESP32 CARRINHO (SLAVE) ---");
+    Serial.println("Aguardando conexão da ESP32-CAM...");
+  } else {
+    Serial.println("Erro ao inicializar o Bluetooth!");
+  }
+}
+
+void loop() {
+  if (SerialBT.available()) {
+    String comando = SerialBT.readStringUntil('\n');
+    comando.trim();
+
+    if (comando.length() > 0) {
+      Serial.print("[BT Recebido]: ");
+      Serial.println(comando);
+
+      if (comando == "FOTO_TIRADA") {
+        Serial.println("-> Comando 'FOTO_TIRADA' recebido! Acendendo LEDs 25 e 13...");
+        piscarLedsAcao();
+      }
+    }
+  }
+
+  delay(20);
+}
