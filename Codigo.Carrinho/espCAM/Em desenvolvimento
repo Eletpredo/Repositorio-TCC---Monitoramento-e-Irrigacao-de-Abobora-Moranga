@@ -1,0 +1,99 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <BluetoothSerial.h>
+
+BluetoothSerial SerialBT;
+
+// Nome do Bluetooth da ESP32 do Carrinho
+String nomeRoboBT = "ESP32_Carrinho_Robo"; 
+
+const int ssid = "Note_natalia/pedro";
+const int password = "21011997"
+
+void conectarBluetooth() {
+  if (!SerialBT.connected(0)) {
+    Serial.println("[BT CAM] Tentando conectar ao Carrinho...");
+    if (SerialBT.connect(nomeRoboBT)) {
+      Serial.println("[BT CAM] Conectado ao Carrinho com sucesso!");
+    } else {
+      Serial.println("[BT CAM] Falha ao conectar. Tentará novamente no próximo ciclo.");
+    }
+  }
+}
+
+
+Void conectarWiFI() {
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    i++;
+    if (i >= 25) {
+      Serial.println("\nImpossível conectar à internet!");
+      break;
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWi-Fi Conectado!");
+    Serial.print("IP da ESP32-CAM: ");
+    Serial.println(WiFi.localIP());
+  }
+}
+
+void AvisarFrente() {
+  conectarBluetooth();
+
+  if (SerialBT.connected(0)) {
+    SerialBT.println("Tirar_foto");
+    Serial.println("[BT CAM] Comando 'Tirar_foto' enviado!");
+  } else {
+    Serial.println("[BT CAM] Erro: Bluetooth desconectado.");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("\n--- ESP32-CAM (MASTER BT) ---");
+
+  // Inicia em modo Master (true)
+  SerialBT.begin("ESP32_CAM_Master", true);
+  Serial.println("Bluetooth Master iniciado.");
+
+  conectarBluetooth();
+  conectarWiFI();     
+}
+
+void loop() {
+  // Envia o comando a cada 5 segundos para teste dos LEDs
+  enviarSinalFoto();
+  delay(5000); while (millis() - tempoInicio < 2000) { // Aguarda até 2 segundos
+    
+      if (SerialBT.available()) {
+        String resposta = SerialBT.readStringUntil('\n');
+        resposta.trim();
+
+        Serial.print("[CAM] Resposta recebida do Carrinho: ");
+        Serial.println(resposta);
+
+        if (resposta == "LED_CONFIRMADO") {
+          Serial.println("[CAM] O carrinho confirmou que acendeu os LEDs!");
+        }
+        respondeu = true;
+        break;
+      }
+    }
+
+    if (!respondeu) {
+      Serial.println("[CAM] O carrinho não respondeu a tempo.");
+    }
+  
+
+  delay(5000); // Aguarda 5 segundos antes de testar novamente
+
+
+}
