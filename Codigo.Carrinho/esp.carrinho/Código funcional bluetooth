@@ -8,13 +8,12 @@ BluetoothSerial SerialBT;
 #define LED2_PIN   13  // LED 2 (Piscar Frente)
 #define LED3_PIN   33  // LED 3 (Piscar Parar)
 
-// Pinos dos motores mantidos conforme pedido
 #define motorA1    15
 #define motorA2    16
 #define motorB1    17
 #define motorB2    18
 
-int i; // Variável de controle genérica para os loops
+int i;
 
 // Callback de status do Bluetooth
 void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
@@ -28,7 +27,6 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
   }
 }
 
-// Função para piscar o LED 2 (Frente) 10 vezes
 void piscarFrente() {
   i = 0;
   while (i < 10) {
@@ -40,10 +38,9 @@ void piscarFrente() {
   }
 }
 
-// Função para piscar o LED 3 (Parar) 10 vezes
 void piscarParar() {
-  i = 0; // Utiliza 'i' já declarado globalmente
-  while (i < 10) {
+  i = 0;
+ while (i < 10) {
     digitalWrite(LED3_PIN, HIGH);
     delay(200); 
     digitalWrite(LED3_PIN, LOW);
@@ -107,12 +104,10 @@ void setup() {
     if (comando == "Andar_para_frente") {
       Serial.println("\n-> Executando movimento...");
       
-      // Simula o trajeto
       piscarFrente();
       Frente();
       delay(2000); // Simula o tempo andado
 
-      // Simula a parada
       parar();
       piscarParar();
 
