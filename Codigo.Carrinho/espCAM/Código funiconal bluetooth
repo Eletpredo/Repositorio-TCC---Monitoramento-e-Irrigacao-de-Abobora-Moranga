@@ -1,50 +1,173 @@
 #include <Arduino.h>
+#include "esp_camera.h"
+#include <WiFi.h>
+#include <WebServer.h>
 #include "BluetoothSerial.h"
 
+// --- CONFIGURAÇÃO DE REDE ---
+const char* ssid = "Bar do pedro";
+const char* password = "03031968";
+
 BluetoothSerial SerialBT;
+String nomeRoboBT = "ESP32_Carrinho_Robo";
 
-// Nome do Bluetooth da ESP32 do Carrinho
-String nomeRoboBT = "ESP32_Carrinho_Robo"; 
+WebServer server(80);
+camera_fb_t * fb_global = NULL; // Guarda a última foto capturada
 
-void conectarBluetooth() {
-  if (!SerialBT.connected(0)) {
-    Serial.println("[BT CAM] Tentando conectar ao Carrinho...");
-    if (SerialBT.connect(nomeRoboBT)) {
-      Serial.println("[BT CAM] Conectado ao Carrinho com sucesso!");
-    } else {
-      Serial.println("[BT CAM] Falha ao conectar. Tentará novamente no próximo ciclo.");
-    }
+// --- PINOS DA ESP32-CAM (MODELO AI THINKER) ---
+#define PWDN_GPIO_NUM     32
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
+void iniciarCamera() {
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.frame_size = FRAMESIZE_VGA; // 640x480
+  config.jpeg_quality = 12;          // 0 a 63
+  config.fb_count = 1;
+
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Falha na câmera: 0x%x\n", err);
+    return;
+  }
+  Serial.println("Câmera inicializada com sucesso!");
+}
+
+// Rota HTTP para servir a foto
+void handleFoto() {
+  if (fb_global != NULL) {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.setContentLength(fb_global->len);
+    server.send(200, "image/jpeg", "");
+    
+    WiFiClient client = server.client();
+    client.write(fb_global->buf, fb_global->len);
+    Serial.println("[HTTP] Foto enviada ao navegador/site com sucesso!");
+  } else {
+    server.send(404, "text/plain", "Nenhuma foto disponível no momento.");
   }
 }
 
-void enviarSinalFoto() {
-  conectarBluetooth();
+void tirarFoto() {
+  // Libera a foto antiga da RAM antes de pegar uma nova
+  if (fb_global != NULL) {
+    esp_camera_fb_return(fb_global);
+    fb_global = NULL;
+  }
 
-  if (SerialBT.connected(0)) {
-    SerialBT.println("FOTO_TIRADA");
-    Serial.println("[BT CAM] Comando 'FOTO_TIRADA' enviado!");
+  // Captura a nova foto
+  fb_global = esp_camera_fb_get();
+  if (!fb_global) {
+    Serial.println("[CAM] Erro ao capturar foto do sensor!");
   } else {
-    Serial.println("[BT CAM] Erro: Bluetooth desconectado.");
+    Serial.println("[CAM] Nova foto capturada e pronta na memória!");
+  }
+}
+
+// Função auxiliar para manter o servidor respondendo durante os delays
+void aguardarComHttp(unsigned long milissegundos) {
+  unsigned long inicio = millis();
+  while (millis() - inicio < milissegundos) {
+    server.handleClient();
+    delay(10);
   }
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
 
-  Serial.println("\n--- ESP32-CAM (MASTER BT) ---");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi Conectado!");
+  Serial.print("Endereço IP da ESP32-CAM: ");
+  Serial.println(WiFi.localIP());
 
-  // Inicia em modo Master (true)
+  iniciarCamera();
+
+  // Configura a rota HTTP: http://<IP_DA_ESP>/foto.jpg
+  server.on("/foto.jpg", handleFoto);
+  server.begin();
+  Serial.println("Servidor Web HTTP Iniciado!");
+
+  // Inicializa o Bluetooth em modo Master
   SerialBT.begin("ESP32_CAM_Master", true);
-  Serial.println("Bluetooth Master iniciado.");
-
-  // Primeira tentativa de conexão
-  conectarBluetooth();
+  SerialBT.connect(nomeRoboBT);
 }
 
 void loop() {
-  // Envia o comando a cada 5 segundos para teste dos LEDs
-  enviarSinalFoto();
-  
-  delay(5000); 
+  // Trata requisições web constantemente
+  server.handleClient();
+
+  if (SerialBT.connected(0)) {
+    Serial.println("\n[BT CAM] Enviando 'Andar_para_frente'...");
+    SerialBT.println("Andar_para_frente");
+
+    unsigned long tempoInicio = millis();
+    bool recebeuFeedback = false;
+
+    // Aguarda feedback do carrinho por até 10 segundos
+    while (millis() - tempoInicio < 10000) {
+      server.handleClient(); // Atende o navegador enquanto espera o Bluetooth
+      if (SerialBT.available()) {
+        String resposta = SerialBT.readStringUntil('\n');
+        resposta.trim();
+        if (resposta == "PRONTO_PARA_FOTO") {
+          recebeuFeedback = true;
+          break;
+        }
+      }
+      delay(10);
+    }
+
+    if (recebeuFeedback) {
+      Serial.println("[CAM] Recebeu aviso do carrinho. Tirando foto...");
+      tirarFoto();
+
+      // Dá um tempo de 8 segundos para o site/navegador carregar a foto do IP
+      // antes de pedir ao carrinho para andar de novo
+      Serial.println("[CAM] Disponibilizando foto no servidor HTTP (aguardando 8s)...");
+      aguardarComHttp(15000); 
+    }
+  } else {
+    SerialBT.connect(nomeRoboBT);
+    aguardarComHttp(2000);
+  }
 }
