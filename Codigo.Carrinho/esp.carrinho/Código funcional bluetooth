@@ -4,29 +4,66 @@
 BluetoothSerial SerialBT;
 
 // Definição dos Pinos dos LEDs
-#define LED_BT_PIN 2   // LED indicador de conexão Bluetooth
-#define LED1_PIN   25  // LED 1
-#define LED2_PIN   13  // LED 2
+#define LED1_PIN   25  // LED 1 (Status BT)
+#define LED2_PIN   13  // LED 2 (Piscar Frente)
+#define LED3_PIN   33  // LED 3 (Piscar Parar)
+
+// Pinos dos motores mantidos conforme pedido
+#define motorA1    15
+#define motorA2    16
+#define motorB1    17
+#define motorB2    18
+
+int i; // Variável de controle genérica para os loops
 
 // Callback de status do Bluetooth
 void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
   if (event == ESP_SPP_SRV_OPEN_EVT) {
-    digitalWrite(LED_BT_PIN, HIGH); // Acende o LED indicador de conexão
+    digitalWrite(LED1_PIN, HIGH); 
     Serial.println("\n[BT Carrinho] Conectado! LED de Status ACESO.");
   } 
   else if (event == ESP_SPP_CLOSE_EVT) {
-    digitalWrite(LED_BT_PIN, LOW);  // Apaga o LED indicador
+    digitalWrite(LED1_PIN, LOW);
     Serial.println("\n[BT Carrinho] Desconectado! LED de Status APAGADO.");
   }
 }
 
-// Função para acionar os LEDs dos pinos 25 e 13
-void piscarLedsAcao() {
-  digitalWrite(LED1_PIN, HIGH);
-  digitalWrite(LED2_PIN, HIGH);
-  delay(1000); // Ficam acesos por 1 segundo
-  digitalWrite(LED1_PIN, LOW);
-  digitalWrite(LED2_PIN, LOW);
+// Função para piscar o LED 2 (Frente) 10 vezes
+void piscarFrente() {
+  i = 0;
+  while (i < 10) {
+    digitalWrite(LED2_PIN, HIGH);
+    delay(200); 
+    digitalWrite(LED2_PIN, LOW);
+    delay(200);
+    i++;
+  }
+}
+
+// Função para piscar o LED 3 (Parar) 10 vezes
+void piscarParar() {
+  i = 0; // Utiliza 'i' já declarado globalmente
+  while (i < 10) {
+    digitalWrite(LED3_PIN, HIGH);
+    delay(200); 
+    digitalWrite(LED3_PIN, LOW);
+    delay(200);
+    i++;
+  }
+}
+
+void Frente() {
+  digitalWrite(motorA1, 1);
+  digitalWrite(motorA2, 0);
+  digitalWrite(motorB1, 1);
+  digitalWrite(motorB2, 0);
+}
+
+void parar() {
+  digitalWrite(motorA1, 0);
+  digitalWrite(motorA2, 0);
+  digitalWrite(motorB1, 0);
+  digitalWrite(motorB2, 0);
 }
 
 void setup() {
@@ -34,14 +71,21 @@ void setup() {
   delay(1000);
 
   // Configura os pinos dos LEDs como saída
-  pinMode(LED_BT_PIN, OUTPUT);
   pinMode(LED1_PIN, OUTPUT);
   pinMode(LED2_PIN, OUTPUT);
+  pinMode(LED3_PIN, OUTPUT);
+
+  pinMode(motorA1, OUTPUT);
+  pinMode(motorA2, OUTPUT);
+  pinMode(motorB1, OUTPUT);
+  pinMode(motorB2, OUTPUT);
 
   // Inicia com os LEDs apagados
-  digitalWrite(LED_BT_PIN, LOW);
   digitalWrite(LED1_PIN, LOW);
   digitalWrite(LED2_PIN, LOW);
+  digitalWrite(LED3_PIN, LOW);
+
+  parar();
 
   // Registra o callback de eventos antes de iniciar
   SerialBT.register_callback(btCallback);
@@ -55,19 +99,26 @@ void setup() {
   }
 }
 
-void loop() {
+ void loop() {
   if (SerialBT.available()) {
     String comando = SerialBT.readStringUntil('\n');
     comando.trim();
 
-    if (comando.length() > 0) {
-      Serial.print("[BT Recebido]: ");
-      Serial.println(comando);
+    if (comando == "Andar_para_frente") {
+      Serial.println("\n-> Executando movimento...");
+      
+      // Simula o trajeto
+      piscarFrente();
+      Frente();
+      delay(2000); // Simula o tempo andado
 
-      if (comando == "FOTO_TIRADA") {
-        Serial.println("-> Comando 'FOTO_TIRADA' recebido! Acendendo LEDs 25 e 13...");
-        piscarLedsAcao();
-      }
+      // Simula a parada
+      parar();
+      piscarParar();
+
+      // Envia o feedback para a ESP32-CAM tirar a foto
+      Serial.println("-> Movimento concluído. Enviando 'PRONTO_PARA_FOTO'...");
+      SerialBT.println("PRONTO_PARA_FOTO");
     }
   }
 
